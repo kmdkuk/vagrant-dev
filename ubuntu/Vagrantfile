@@ -1,0 +1,53 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+
+  # vagrant plugin install vagrant-vbguest
+  unless defined? config.vbguest
+    require "vagrant-vbguest"
+  end
+  config.vbguest.auto_update = true
+
+  # vagrant plugin install vagrant-disksize
+  config.disksize.size = '100GB'
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 16384
+    vb.cpus = 6
+    vb.customize ["modifyvm", :id, "--nictype1",  "virtio"]
+    vb.customize ["modifyvm", :id, "--nictype2",  "virtio"]
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    vb.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
+    vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+  end
+
+  config.vm.provision "docker"
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get purge -y --autoremove apport apport-symptoms fwupd nano popularity-contest unattended-upgrades update-manager-core snapd
+    apt-get install -y build-essential manpages-dev git curl
+
+    echo %vagrant ALL=NOPASSWD:ALL > /etc/sudoers.d/vagrant
+    chmod 0440 /etc/sudoers.d/vagrant
+    usermod -a -G sudo vagrant
+  SHELL
+  config.vm.provision "shell", privileged: false, inline: <<-SHELL
+    if [[ ! -e $HOME/.ssh/id_ed25519 ]]; then
+        cat /dev/zero | ssh-keygen -t ed25519 -q -N ""
+    fi
+
+    curl -sSfL setup.kmdk.uk | bash
+  SHELL
+
+  # ssh settings
+  config.ssh.insert_key = false
+  config.ssh.private_key_path = ["~/.ssh/id_ed25519", "~/.vagrant.d/insecure_private_key"]
+  config.vm.provision "file", source: "~/.ssh/id_ed25519.pub", destination: "~/.ssh/authorized_keys"
+  config.vm.provision "shell", inline: <<-SHELL
+    sudo sed -i -e "\#PasswordAuthentication yes# s#PasswordAuthentication yes#PasswordAuthentication no#g" /etc/ssh/sshd_config
+    sudo service ssh restart
+  SHELL
+
+  # x11 forwarding
+  config.ssh.forward_agent = true
+  config.ssh.forward_x11 = true
+end
